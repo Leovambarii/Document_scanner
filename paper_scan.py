@@ -1,17 +1,15 @@
 import cv2
 import sys
 import os
+import time
 import numpy as np
 
 #TODO add sliders
-#TODO add save options hotkeys
 #TODO add edition loop
-#TODO clean code into functions
-#TODO add error files checks + add dedicated folder for images
 FOLDER_SAVE = "results"
 MAX_LEN_IMG = 2048 # Maximum width or height that orginal image will be proportionally resized
 CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
-KEY_CLOSERS = [ord('q'), 27, 32] # q Esc Space - Keys that closes shown windows
+KEY_CLOSERS = [ord('q'), 27] # q Esc - Keys that closes showed windows
 WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | s -> save all components | Spacebar -> save final img"
 
 def check_arguments(img_path: str, save_folder_path: str):
@@ -128,7 +126,7 @@ def auto_balance_img(image: np.ndarray) -> np.ndarray: #TODO edit for better res
     Returns:
         np.ndarray: The normalized image after auto-balancing.
     """
-    normalized_image = cv2.normalize(image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    normalized_image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
 
     return normalized_image
 
@@ -153,13 +151,13 @@ def show_image_on_postion(img: np.ndarray, win_name: str="Image", x: int=10, y: 
 
     return win_name
 
-def save_img(img: np.ndarray, file_name: str, folder_path: os.path=FOLDER_SAVE):
+def save_img(img: np.ndarray, file_name: str, folder_path):
     """Save the image to a file in the specified folder.
 
     Args:
         img (np.ndarray): Image to be saved.
         file_name (str): The name of the file to be saved.
-        folder_path (os.path, optional): Folder where the file should be saved. Defaults to FOLDER_SAVE.
+        folder_path (os.path, optional): Folder where the file should be saved.
     """
     cv2.imwrite(os.path.join(folder_path, file_name), img)
     try:
@@ -168,17 +166,45 @@ def save_img(img: np.ndarray, file_name: str, folder_path: os.path=FOLDER_SAVE):
         print(f"Error: saving image to file: {e}")
         sys.exit(1)
 
-def save_images(images: dict, folder_path: os.path=FOLDER_SAVE):
+def save_images(images: dict, folder_path: os.path):
     """Save images given in dictionary.
 
     Args:
         images (dict): Dictionary of np.ndarray type images.
-        folder_path (os.path, optional): Folder where the file should be saved. Defaults to FOLDER_SAVE.
+        folder_path (os.path, optional): Folder where the file should be saved.
     """
     for file_name, img in images.items():
         save_img(img, file_name, folder_path)
 
-def process_a4(img_path):
+def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=1500, txt_color=(255, 255, 255), bg_color=(45, 134, 45)):
+    """
+    Add text to the middle of the specified window and sleep for certain amount of time, then show original image without text.
+
+    Args:
+        win_name (str): Name of the window.
+        txt (str): Text to be added.
+        img (np.ndarray): Image associated with the window.
+        wait_time (int): Amount of time in miliseconds to wait before added text dissapears. Defaults 1500.
+        txt_color : Color of the text.
+        bg_color : Color of the text background.
+    """
+    img_copy = img.copy()
+
+    font_thickness = 40
+    font_scale = min(img_copy.shape[1] // (len(txt) * font_thickness), img_copy.shape[0] // 10)
+    txt_size, _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+    txt_position = ((img_copy.shape[1] - txt_size[0]) // 2, (img_copy.shape[0] + txt_size[1]) // 2)
+
+    rectangle_size = (txt_size[0] + font_thickness*5, txt_size[1] + font_thickness*5)
+    rectangle_position = ((img_copy.shape[1] - rectangle_size[0]) // 2, (img_copy.shape[0] + rectangle_size[1]) // 2)
+    cv2.rectangle(img_copy, rectangle_position, (rectangle_position[0] + rectangle_size[0], rectangle_position[1] - rectangle_size[1]), bg_color, thickness=cv2.FILLED)
+
+    cv2.putText(img_copy, txt, txt_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, txt_color, font_thickness)
+    cv2.imshow(win_name, img_copy)
+    cv2.waitKey(wait_time)
+    cv2.imshow(win_name, img)
+
+def process_a4(img_path, folder_save): #TODO add docstring
     img = cv2.imread(img_path)
     img_scaled = resize_img(img)
     img_gray = cv2.cvtColor(img_scaled, cv2.COLOR_BGR2GRAY)
@@ -187,17 +213,18 @@ def process_a4(img_path):
 
     contours, _ = cv2.findContours(img_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     img_cons = cv2.drawContours(img_scaled.copy(), contours, -1, (0, 255, 0), 10)
+
     max_contour = max(contours, key=cv2.contourArea) # TODO add case when there is missing contour
     img_con = cv2.drawContours(img_scaled.copy(), [max_contour], 0, (0, 0, 255), 10)
 
     points = get_contour_edge_points(max_contour)
     img_points = img_con.copy()
     for point in points:
-        cv2.circle(img=img_points, center=point, radius=15, color=(255, 0, 0), thickness=-1)
+        cv2.circle(img_points, point, 15, (255, 0, 0), -1)
 
-    img_transformed = transform_perspective_img(img=img_scaled, points=points)
+    img_transformed = transform_perspective_img(img_scaled, points)
     img_cropped = crop_img(img_transformed, CROP_SIZE)
-    img_balanced_gray = auto_balance_img(cv2.cvtColor(img_cropped, cv2.COLOR_BGR2GRAY))
+    img_balanced = auto_balance_img(cv2.cvtColor(img_cropped, cv2.COLOR_BGR2GRAY))
 
     images = {  "img_1_scaled.jpg"      :   img_scaled,
                 "img_2_gray.jpg"        :   cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR),
@@ -208,14 +235,14 @@ def process_a4(img_path):
                 "img_7_points.jpg"      :   img_points,
                 "img_8_transformed.jpg" :   img_transformed,
                 "img_9_cropped.jpg"     :   img_cropped,
-                "img_10_balanced.jpg"   :   cv2.cvtColor(img_balanced_gray, cv2.COLOR_GRAY2BGR)
+                "img_10_balanced.jpg"   :   cv2.cvtColor(img_balanced, cv2.COLOR_GRAY2BGR)
     }
     images_amount_half = len(images) // 2
     images_values = list(images.values())
     row_1 = np.hstack(images_values[:images_amount_half])
     row_2 = np.hstack(images_values[images_amount_half:])
     stacked = np.vstack((row_1, row_2))
-    win_name = show_image_on_postion(img=stacked, win_name=WINDOW_INFO_NAME)
+    win_name = show_image_on_postion(stacked, WINDOW_INFO_NAME)
 
     while True:
         key = cv2.waitKey(1)
@@ -223,7 +250,12 @@ def process_a4(img_path):
             cv2.destroyAllWindows()
             break
         if key == ord('s'):
-            save_images(images=images)
+            save_images(images, folder_save)
+            add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
+        elif key == 32: # Spacebar key
+            save_img(img_cropped, "final_img.jpg", folder_save)
+            save_img(img_balanced, "final_img_balanced.jpg", folder_save)
+            add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
 
 def main():
     if len(sys.argv) not in {2, 3}:
@@ -231,11 +263,10 @@ def main():
         sys.exit(1)
 
     img_path = sys.argv[1]
-    if len(sys.argv) == 3:
-        FOLDER_SAVE = sys.argv[2]
+    folder_save = sys.argv[2] if len(sys.argv) == 3 else FOLDER_SAVE
 
-    check_arguments(img_path, FOLDER_SAVE)
-    process_a4(img_path)
+    check_arguments(img_path, folder_save)
+    process_a4(img_path, folder_save)
 
 if __name__ == "__main__":
     main()
