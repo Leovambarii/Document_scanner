@@ -1,16 +1,33 @@
 import cv2
 import sys
 import os
-import time
 import numpy as np
 
 #TODO add sliders
 #TODO add edition loop
+#TODO tests on multiple different images
+#TODO save images files with names based on its name
+#TODO edit autobalance to achieve a better effect
+#TODO add img labels on display?
 FOLDER_SAVE = "results"
 MAX_LEN_IMG = 2048 # Maximum width or height that orginal image will be proportionally resized
 CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
 KEY_CLOSERS = [ord('q'), 27] # q Esc - Keys that closes showed windows
-WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | s -> save all components | Spacebar -> save final img"
+WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | w -> save all components | e -> save final img | r -> save final img gray" # window name that functions as info text
+
+# Component file name end strings that will be added to original image name
+SCALED_IMG_FILENAME = "1_scaled"
+GRAY_IMG_FILENAME = "2_gray"
+BLUR_IMG_FILENAME = "3_blurred"
+EDGE_IMG_FILENAME = "4_edges"
+CONS_IMG_FILENAME = "5_contours"
+CON_IMG_FILENAME = "6_contour"
+POINTS_IMG_FILENAME = "7_points"
+TRANSFORMED_IMG_FILENAME = "8_transformed"
+BALANCED_IMG_FILENAME = "9_balanced"
+BALANCED_IMG_GRAY_FILENAME = "10_balanced_gray"
+FINAL_IMG = "final"
+FINAL_IMG_GR = "final_bw"
 
 def check_arguments(img_path: str, save_folder_path: str):
     """Check whether given arguments are correct file and results folder paths.
@@ -48,6 +65,12 @@ def resize_img(img: np.ndarray, max_len: int=MAX_LEN_IMG) -> np.ndarray:
         img = cv2.resize(img, new_size, interpolation=cv2.INTER_LINEAR)
 
     return img
+
+def fill_images_with_black(images: dict, ref_img: np.ndarray) -> dict:
+    black_image = np.zeros_like(ref_img)
+    filled_images = {name: black_image.copy() for name in images.keys()}
+
+    return filled_images
 
 def get_contour_edge_points(contour: np.ndarray) -> np.ndarray:
     """Get the edge points of a contour by approximating its shape.
@@ -117,18 +140,33 @@ def crop_img(img: np.ndarray, crop_size: int) -> np.ndarray:
 
     return resized_cropped_img
 
-def auto_balance_img(image: np.ndarray) -> np.ndarray: #TODO edit for better results
+def auto_balance_img_col(img: np.ndarray) -> np.ndarray:
     """Perform auto-balancing on the input image.
 
     Args:
-        image (np.ndarray): Image to be auto-balanced.
+        img (np.ndarray): Image to be auto-balanced.
 
     Returns:
         np.ndarray: The normalized image after auto-balancing.
     """
-    normalized_image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
+    normalized_img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
 
-    return normalized_image
+    return normalized_img
+
+def auto_balance_img_white(img: np.ndarray) -> np.ndarray: #TODO edit for better results - add slider to last value in adaptivetreshold?
+    """Perform auto-balancing on the input image to be black and white.
+
+    Args:
+        img (np.ndarray): Image to be auto-balanced.
+
+    Returns:
+        np.ndarray: Image that is black and white.
+    """
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    adaptive_img = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 7, 4)
+    balanced_img = cv2.medianBlur(adaptive_img, 3)
+
+    return balanced_img
 
 def show_image_on_postion(img: np.ndarray, win_name: str="Image", x: int=10, y: int=10, width: int=1400, height: int=800) -> str:
     """Show given image in a window specified at (x, y) position with shape (width, height)
@@ -151,30 +189,34 @@ def show_image_on_postion(img: np.ndarray, win_name: str="Image", x: int=10, y: 
 
     return win_name
 
-def save_img(img: np.ndarray, file_name: str, folder_path):
+def save_img(img: np.ndarray, file_name: str, folder_path, base_img_name: str, file_format: str):
     """Save the image to a file in the specified folder.
 
     Args:
         img (np.ndarray): Image to be saved.
         file_name (str): The name of the file to be saved.
         folder_path (os.path, optional): Folder where the file should be saved.
+        base_img_name (str): Original image file name for image save file naming.
+        file_format (str): Original image file format.
     """
-    cv2.imwrite(os.path.join(folder_path, file_name), img)
+    full_file_name = base_img_name + '_' + file_name + file_format
     try:
-        cv2.imwrite(os.path.join(folder_path, file_name), img)
+        cv2.imwrite(os.path.join(folder_path, full_file_name), img)
     except Exception as e:
         print(f"Error: saving image to file: {e}")
         sys.exit(1)
 
-def save_images(images: dict, folder_path: os.path):
+def save_images(images: dict, folder_path: os.path, base_img_name: str, file_format: str):
     """Save images given in dictionary.
 
     Args:
         images (dict): Dictionary of np.ndarray type images.
         folder_path (os.path, optional): Folder where the file should be saved.
+        img_file_name (str): Original image file name for image save file naming.
+        file_format (str): Original image file format.
     """
     for file_name, img in images.items():
-        save_img(img, file_name, folder_path)
+        save_img(img, file_name, folder_path, base_img_name, file_format)
 
 def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=1500, txt_color=(255, 255, 255), bg_color=(45, 134, 45)):
     """
@@ -204,39 +246,62 @@ def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=
     cv2.waitKey(wait_time)
     cv2.imshow(win_name, img)
 
-def process_a4(img_path, folder_save): #TODO add docstring
+def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format: str):
+    """Process input image and show component images. Run infinite loop that checks user input.
+
+    Args:
+        img_path (str): Path to original image file.
+        folder_save (str): Folder location where results should be saved.
+        base_img_name (str): Original image file name.
+        file_format (str): Original image file extension.
+    """
     img = cv2.imread(img_path)
     img_scaled = resize_img(img)
+
+    images = {
+        SCALED_IMG_FILENAME         : None,
+        GRAY_IMG_FILENAME           : None,
+        BLUR_IMG_FILENAME           : None,
+        EDGE_IMG_FILENAME           : None,
+        CONS_IMG_FILENAME           : None,
+        CON_IMG_FILENAME            : None,
+        POINTS_IMG_FILENAME         : None,
+        TRANSFORMED_IMG_FILENAME    : None,
+        BALANCED_IMG_FILENAME       : None,
+        BALANCED_IMG_GRAY_FILENAME  : None,
+    }
+    images = fill_images_with_black(images, img_scaled)
+    images[SCALED_IMG_FILENAME] = img_scaled
+
     img_gray = cv2.cvtColor(img_scaled, cv2.COLOR_BGR2GRAY)
+    images[GRAY_IMG_FILENAME] = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
     img_blurred = cv2.GaussianBlur(img_gray, (5, 5), 1)
+    images[BLUR_IMG_FILENAME] = cv2.cvtColor(img_blurred, cv2.COLOR_GRAY2BGR)
     img_edges = cv2.Canny(img_blurred, 30, 200) #TODO real time edge sliders with spacebar confirmation
+    images[EDGE_IMG_FILENAME] = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2BGR)
 
     contours, _ = cv2.findContours(img_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     img_cons = cv2.drawContours(img_scaled.copy(), contours, -1, (0, 255, 0), 10)
+    images[CONS_IMG_FILENAME] = img_cons
 
     max_contour = max(contours, key=cv2.contourArea) # TODO add case when there is missing contour
     img_con = cv2.drawContours(img_scaled.copy(), [max_contour], 0, (0, 0, 255), 10)
+    images[CON_IMG_FILENAME] = img_con
 
     points = get_contour_edge_points(max_contour)
     img_points = img_con.copy()
     for point in points:
         cv2.circle(img_points, point, 15, (255, 0, 0), -1)
+    images[POINTS_IMG_FILENAME] = img_points
 
     img_transformed = transform_perspective_img(img_scaled, points)
+    images[TRANSFORMED_IMG_FILENAME] = img_transformed
     img_cropped = crop_img(img_transformed, CROP_SIZE)
-    img_balanced = auto_balance_img(cv2.cvtColor(img_cropped, cv2.COLOR_BGR2GRAY))
+    img_balanced = auto_balance_img_col(img_cropped)
+    images[BALANCED_IMG_FILENAME] = img_balanced
+    img_balanced_gray = auto_balance_img_white(img_cropped)
+    images[BALANCED_IMG_GRAY_FILENAME] = cv2.cvtColor(img_balanced_gray, cv2.COLOR_GRAY2BGR)
 
-    images = {  "img_1_scaled.jpg"      :   img_scaled,
-                "img_2_gray.jpg"        :   cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR),
-                "img_3_blurred.jpg"     :   cv2.cvtColor(img_blurred, cv2.COLOR_GRAY2BGR),
-                "img_4_edges.jpg"       :   cv2.cvtColor(img_edges, cv2.COLOR_GRAY2BGR),
-                "img_5_contours.jpg"    :   img_cons,
-                "img_6_contour.jpg"     :   img_con,
-                "img_7_points.jpg"      :   img_points,
-                "img_8_transformed.jpg" :   img_transformed,
-                "img_9_cropped.jpg"     :   img_cropped,
-                "img_10_balanced.jpg"   :   cv2.cvtColor(img_balanced, cv2.COLOR_GRAY2BGR)
-    }
     images_amount_half = len(images) // 2
     images_values = list(images.values())
     row_1 = np.hstack(images_values[:images_amount_half])
@@ -249,12 +314,21 @@ def process_a4(img_path, folder_save): #TODO add docstring
         if key in KEY_CLOSERS or cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1:
             cv2.destroyAllWindows()
             break
-        if key == ord('s'):
-            save_images(images, folder_save)
+        if key == ord('w'):
+            components_save = os.path.join(folder_save, "saved_components")
+            if not os.path.exists(components_save):
+                try:
+                    os.makedirs(components_save)
+                except Exception as e:
+                    print(f"Error: Could not create the '{components_save}' folder: {e}")
+                    sys.exit(1)
+            save_images(images, components_save, base_img_name, file_format)
             add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
-        elif key == 32: # Spacebar key
-            save_img(img_cropped, "final_img.jpg", folder_save)
-            save_img(img_balanced, "final_img_balanced.jpg", folder_save)
+        elif key == ord('e'):
+            save_img(img_cropped, FINAL_IMG, folder_save, base_img_name, file_format)
+            add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
+        elif key == ord('r'):
+            save_img(img_balanced_gray, FINAL_IMG_GR, folder_save, base_img_name, file_format)
             add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
 
 def main():
@@ -266,7 +340,8 @@ def main():
     folder_save = sys.argv[2] if len(sys.argv) == 3 else FOLDER_SAVE
 
     check_arguments(img_path, folder_save)
-    process_a4(img_path, folder_save)
+    base_img_name, file_format = os.path.splitext(os.path.basename(img_path))
+    process_a4(img_path, folder_save, base_img_name, file_format)
 
 if __name__ == "__main__":
     main()
