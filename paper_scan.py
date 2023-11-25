@@ -3,21 +3,31 @@ import sys
 import os
 import numpy as np
 
-#TODO add sliders
-#TODO add edition loop
-#TODO tests on multiple different images
-#TODO add img labels on display?
-#TODO sliders for blur, edges, crop size, autobalance
+#TODO add camera option if no input image is specified
 FOLDER_SAVE = "results"
 MAX_LEN_IMG = 2048 # Maximum width or height that orginal image will be proportionally resized
-MIN_CONTOUR_AREA_PERC = 30 # Minimum percentage of image that a best countour should have (int in range 0 to 100)
-CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
+MIN_CONTOUR_AREA_PERC = 20 # Minimum percentage of image that a best countour should have (int in range 0 to 100)
 KEY_CLOSERS = [ord('q'), 27] # q Esc - Keys that closes showed windows
 WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | w -> save all components | e -> save final img | r -> save final img gray" # Window name that functions as info text
 TEXT_COL = (255, 255, 255) # Color of text on info popup
 POS_INFO = (45, 134, 45) # Color of positive info popup
 NEG_INFO = (0, 51, 255) # Color of negative info popup
 WARN_INFO = (0, 153, 255) # Color of warning info popup
+TRACKBAR_CHANGE = False # Flag for indicating whether trackbar was changed and there is a need to create new images
+
+#Initial trackbar values
+BOTTOM_EDGE_TRESH = 30 # Value for edge detection bottom threshold
+TOP_EDGE_TRESH = 200 # Value for edge detection top threshold
+INIT_CROP_SIZE = 1 # Amount of pixels that will be cropped from each side of original scaled image
+CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
+BW_AUTOBALANCE = 2 # Value for black and white autobalance intensity
+
+# Trackbars names
+INIT_CROP_TRACKBAR = "Init cropping size"
+EDGE_BOT_TRACKBAR = "Edges threshold bottom"
+EDGE_TOP_TRACKBAR = "Edges threshold top"
+CROP_TRACKBAR = "Cropping size"
+BW_AUTOBALANCE_TRACKBAR = "Auto balance white&black"
 
 # Component file name end strings that will be added to original image name when saved
 SCALED_IMG_FILENAME = "1_scaled"
@@ -157,6 +167,9 @@ def crop_img(img: np.ndarray, crop_size: int) -> np.ndarray:
     Returns:
         np.ndarray: Cropped and resized image.
     """
+    max_crop_size = min(img.shape[0], img.shape[1]) // 2
+    if crop_size > max_crop_size:
+        crop_size = max_crop_size
     cropped_img = img[crop_size:-crop_size, crop_size:-crop_size]
     resized_cropped_img = cv2.resize(cropped_img, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
 
@@ -185,31 +198,107 @@ def auto_balance_img_white(img: np.ndarray) -> np.ndarray:
         np.ndarray: Image that is black and white.
     """
     gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    adaptive_img = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 7, 4)
+    adaptive_img = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 7, BW_AUTOBALANCE)
     balanced_img = cv2.medianBlur(adaptive_img, 3)
 
     return balanced_img
 
-def show_image_on_postion(img: np.ndarray, win_name: str="Image", x: int=10, y: int=10, width: int=1400, height: int=800) -> str:
-    """Show given image in a window specified at (x, y) position with shape (width, height)
+def nothing_callback(val):
+    """Callback function for trackbrs that does nothing.
+    """
+    pass
+
+def update_init_crop_size(val: int):
+    """Update global init crop size variable on trackbar change.
+
+    Args:
+        val (int): New value to set.
+    """
+    global INIT_CROP_SIZE, TRACKBAR_CHANGE
+    if val == 0:
+        val = 1
+    if INIT_CROP_SIZE != val:
+        INIT_CROP_SIZE = val
+        TRACKBAR_CHANGE = True
+    cv2.setTrackbarPos(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, INIT_CROP_SIZE)
+
+def update_edge_bot(val: int):
+    """Update global bottom edge threshold variable on trackbar change.
+
+    Args:
+        val (int): New value to set.
+    """
+    global BOTTOM_EDGE_TRESH, TOP_EDGE_TRESH, TRACKBAR_CHANGE
+    if BOTTOM_EDGE_TRESH != val:
+        BOTTOM_EDGE_TRESH = val
+        if BOTTOM_EDGE_TRESH > TOP_EDGE_TRESH:
+            TOP_EDGE_TRESH = BOTTOM_EDGE_TRESH
+            cv2.setTrackbarPos(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, val)
+        TRACKBAR_CHANGE = True
+    cv2.setTrackbarPos(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, BOTTOM_EDGE_TRESH)
+
+def update_edge_top(val: int):
+    """Update global top edge threshold variable on trackbar change.
+
+    Args:
+        val (int): New value to set.
+    """
+    global TOP_EDGE_TRESH, BOTTOM_EDGE_TRESH, TRACKBAR_CHANGE
+    if TOP_EDGE_TRESH != val:
+        TOP_EDGE_TRESH = val
+        if TOP_EDGE_TRESH < BOTTOM_EDGE_TRESH:
+            BOTTOM_EDGE_TRESH = TOP_EDGE_TRESH
+            cv2.setTrackbarPos(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, val)
+        TRACKBAR_CHANGE = True
+    cv2.setTrackbarPos(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, TOP_EDGE_TRESH)
+
+def update_crop_size(val: int):
+    """Update global crop size variable on trackbar change.
+
+    Args:
+        val (int): New value to set.
+    """
+    global CROP_SIZE, TRACKBAR_CHANGE
+    if val == 0:
+        val = 1
+    if CROP_SIZE != val:
+        CROP_SIZE = val
+        TRACKBAR_CHANGE = True
+    cv2.setTrackbarPos(CROP_TRACKBAR, WINDOW_INFO_NAME, CROP_SIZE)
+
+def update_auto_balance(val: int):
+    """Update global black and withe autobalance variable on trackbar change.
+
+    Args:
+        val (int): New value to set.
+    """
+    global BW_AUTOBALANCE, TRACKBAR_CHANGE
+    if BW_AUTOBALANCE != val:
+        BW_AUTOBALANCE = val
+        TRACKBAR_CHANGE = True
+    cv2.setTrackbarPos(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, BW_AUTOBALANCE)
+
+def show_image_on_postion(img: np.ndarray, x: int=10, y: int=10, width: int=1400, height: int=800):
+    """Show given image in a window specified at (x, y) position with shape (width, height). Also adds trackbars for edges, cropsize and autobalance.
 
     Args:
         img (np.ndarray): Image to be shown.
-        win_name (str, optional): Name of the window. Defaults to "Image".
         x (int, optional): Horizontal position of the beggining of thr window. Defaults to 10.
         y (int, optional): Vertical position of the beggining of the window. Defaults to 10.
         width (int, optional): Width of the window. Defaults to 1400.
         height (int, optional): Height of the window. Defaults to 800.
-
-    Returns:
-        str: Name of the window for future reference.
     """
-    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
-    cv2.moveWindow(win_name, x, y)
-    cv2.resizeWindow(win_name, width, height)
-    cv2.imshow(win_name, img)
+    cv2.namedWindow(WINDOW_INFO_NAME, cv2.WINDOW_NORMAL)
 
-    return win_name
+    cv2.createTrackbar(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, nothing_callback)
+    cv2.createTrackbar(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, 0, 255, nothing_callback)
+    cv2.createTrackbar(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, 0, 255, nothing_callback)
+    cv2.createTrackbar(CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, nothing_callback)
+    cv2.createTrackbar(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, 0, 15, nothing_callback)
+
+    cv2.resizeWindow(WINDOW_INFO_NAME, width, height)
+    cv2.moveWindow(WINDOW_INFO_NAME, x, y)
+    cv2.imshow(WINDOW_INFO_NAME, img)
 
 def save_img(img: np.ndarray, file_name: str, folder_path, base_img_name: str, file_format: str) -> bool:
     """Save the image to a file in the specified folder. Return boolean status of operation.
@@ -276,30 +365,9 @@ def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=
     cv2.waitKey(wait_time)
     cv2.imshow(win_name, img)
 
-def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format: str):
-    """Process input image and show component images. Run infinite loop that checks user input.
-
-    Args:
-        img_path (str): Path to original image file.
-        folder_save (str): Folder location where results should be saved.
-        base_img_name (str): Original image file name.
-        file_format (str): Original image file extension.
-    """
-    img = cv2.imread(img_path)
+def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray): #TODO docstring
     img_scaled = resize_img(img)
-
-    images = {
-        SCALED_IMG_FILENAME         : None,
-        GRAY_IMG_FILENAME           : None,
-        BLUR_IMG_FILENAME           : None,
-        EDGE_IMG_FILENAME           : None,
-        CONS_IMG_FILENAME           : None,
-        CON_IMG_FILENAME            : None,
-        POINTS_IMG_FILENAME         : None,
-        TRANSFORMED_IMG_FILENAME    : None,
-        BALANCED_IMG_FILENAME       : None,
-        BALANCED_IMG_GRAY_FILENAME  : None,
-    }
+    img_scaled = crop_img(img_scaled, INIT_CROP_SIZE)
     images = fill_images_with_black(images, img_scaled)
     images[SCALED_IMG_FILENAME] = img_scaled
 
@@ -307,10 +375,13 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
     images[GRAY_IMG_FILENAME] = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
     img_blurred = cv2.GaussianBlur(img_gray, (5, 5), 1)
     images[BLUR_IMG_FILENAME] = cv2.cvtColor(img_blurred, cv2.COLOR_GRAY2BGR)
-    img_edges = cv2.Canny(img_blurred, 30, 200) #TODO real time edge sliders with spacebar confirmation
-    images[EDGE_IMG_FILENAME] = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2BGR)
+    img_edges = cv2.Canny(img_blurred, BOTTOM_EDGE_TRESH, TOP_EDGE_TRESH)
+    kernel = np.ones((3, 3))
+    img_dial = cv2.dilate(img_edges, kernel, iterations=2)
+    img_erode = cv2.erode(img_dial, kernel, iterations=1)
+    images[EDGE_IMG_FILENAME] = cv2.cvtColor(img_erode, cv2.COLOR_GRAY2BGR)
 
-    contours, _ = cv2.findContours(img_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(img_erode, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     img_cons = cv2.drawContours(img_scaled.copy(), contours, -1, (0, 255, 0), 10)
     images[CONS_IMG_FILENAME] = img_cons
 
@@ -328,6 +399,7 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
         img_transformed = transform_perspective_img(img_scaled, points)
         images[TRANSFORMED_IMG_FILENAME] = img_transformed
         img_cropped = crop_img(img_transformed, CROP_SIZE)
+
         img_balanced = auto_balance_img_col(img_cropped)
         images[BALANCED_IMG_FILENAME] = img_balanced
         img_balanced_gray = auto_balance_img_white(img_cropped)
@@ -338,13 +410,52 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
     row_1 = np.hstack(images_values[:images_amount_half])
     row_2 = np.hstack(images_values[images_amount_half:])
     stacked = np.vstack((row_1, row_2))
-    win_name = show_image_on_postion(stacked, WINDOW_INFO_NAME)
+
+    return images, stacked
+
+def display_loop(img_path: str, folder_save: str, base_img_name: str, file_format: str): #TODO finish docstring and clean up arguments
+    images = {
+        SCALED_IMG_FILENAME         : None,
+        GRAY_IMG_FILENAME           : None,
+        BLUR_IMG_FILENAME           : None,
+        EDGE_IMG_FILENAME           : None,
+        CONS_IMG_FILENAME           : None,
+        CON_IMG_FILENAME            : None,
+        POINTS_IMG_FILENAME         : None,
+        TRANSFORMED_IMG_FILENAME    : None,
+        BALANCED_IMG_FILENAME       : None,
+        BALANCED_IMG_GRAY_FILENAME  : None,
+    }
+
+    img = cv2.imread(img_path)
+    images, stacked = process_img(images, img)
+    show_image_on_postion(stacked)
+
+    global TRACKBAR_CHANGE
+    TRACKBAR_CHANGE = False
+
+    cv2.setTrackbarPos(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, INIT_CROP_SIZE)
+    cv2.setTrackbarPos(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, BOTTOM_EDGE_TRESH)
+    cv2.setTrackbarPos(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, TOP_EDGE_TRESH)
+    cv2.setTrackbarPos(CROP_TRACKBAR, WINDOW_INFO_NAME, CROP_SIZE)
+    cv2.setTrackbarPos(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, BW_AUTOBALANCE)
 
     while True:
         key = cv2.waitKey(1)
-        if key in KEY_CLOSERS or cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1:
+        if key in KEY_CLOSERS or cv2.getWindowProperty(WINDOW_INFO_NAME, cv2.WND_PROP_VISIBLE) < 1:
             cv2.destroyAllWindows()
             break
+
+        update_init_crop_size(cv2.getTrackbarPos(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME))
+        update_edge_bot(cv2.getTrackbarPos(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME))
+        update_edge_top(cv2.getTrackbarPos(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME))
+        update_crop_size(cv2.getTrackbarPos(CROP_TRACKBAR, WINDOW_INFO_NAME))
+        update_auto_balance(cv2.getTrackbarPos(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME))
+
+        if TRACKBAR_CHANGE:
+            images, stacked = process_img(images, img)
+            cv2.imshow(WINDOW_INFO_NAME, stacked)
+            TRACKBAR_CHANGE = False
 
         status, message, bg_color = None, None, None
 
@@ -368,7 +479,7 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
 
         if status is not None:
             bg_color = POS_INFO if status else (NEG_INFO if "NO IMAGE" in message else WARN_INFO)
-            add_info_on_window(win_name, message, stacked, bg_color=bg_color)
+            add_info_on_window(WINDOW_INFO_NAME, message, stacked, bg_color=bg_color)
 
 def main():
     if len(sys.argv) not in {2, 3}:
@@ -380,7 +491,7 @@ def main():
 
     check_arguments(img_path, folder_save)
     base_img_name, file_format = os.path.splitext(os.path.basename(img_path))
-    process_a4(img_path, folder_save, base_img_name, file_format)
+    display_loop(img_path, folder_save, base_img_name, file_format)
 
 if __name__ == "__main__":
     main()
