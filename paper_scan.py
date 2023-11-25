@@ -6,16 +6,20 @@ import numpy as np
 #TODO add sliders
 #TODO add edition loop
 #TODO tests on multiple different images
-#TODO save images files with names based on its name
-#TODO edit autobalance to achieve a better effect
 #TODO add img labels on display?
+#TODO sliders for blur, edges, crop size, autobalance
 FOLDER_SAVE = "results"
 MAX_LEN_IMG = 2048 # Maximum width or height that orginal image will be proportionally resized
+MIN_CONTOUR_AREA_PERC = 30 # Minimum percentage of image that a best countour should have (int in range 0 to 100)
 CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
 KEY_CLOSERS = [ord('q'), 27] # q Esc - Keys that closes showed windows
-WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | w -> save all components | e -> save final img | r -> save final img gray" # window name that functions as info text
+WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | w -> save all components | e -> save final img | r -> save final img gray" # Window name that functions as info text
+TEXT_COL = (255, 255, 255) # Color of text on info popup
+POS_INFO = (45, 134, 45) # Color of positive info popup
+NEG_INFO = (0, 51, 255) # Color of negative info popup
+WARN_INFO = (0, 153, 255) # Color of warning info popup
 
-# Component file name end strings that will be added to original image name
+# Component file name end strings that will be added to original image name when saved
 SCALED_IMG_FILENAME = "1_scaled"
 GRAY_IMG_FILENAME = "2_gray"
 BLUR_IMG_FILENAME = "3_blurred"
@@ -67,24 +71,42 @@ def resize_img(img: np.ndarray, max_len: int=MAX_LEN_IMG) -> np.ndarray:
     return img
 
 def fill_images_with_black(images: dict, ref_img: np.ndarray) -> dict:
+    """Fill all values of images dict with default black images that have shape of reference image.
+
+    Args:
+        images (dict): Dictionary that will contain np.ndarray images as values with its names as keys.
+        ref_img (np.ndarray): Reference image.
+
+    Returns:
+        dict: Filled dictionary with default black images.
+    """
     black_image = np.zeros_like(ref_img)
     filled_images = {name: black_image.copy() for name in images.keys()}
 
     return filled_images
 
-def get_contour_edge_points(contour: np.ndarray) -> np.ndarray:
-    """Get the edge points of a contour by approximating its shape.
+def get_max_contour(img: np.ndarray, contours: np.ndarray) -> np.array:
+    """Get the biggest contour that is rectangle-like and with size of at least 30% of image.
 
     Args:
-        contour (np.ndarray): The input contour.
+        img (np.ndarray): Input image.
+        contours (np.ndarray): The contours of the image.
 
     Returns:
-        np.ndarray: An array containing the edge points of the approximated contour.
+        np.array: Biggest contour that meets requirements, returns None if no contour meets the specified requirements.
     """
-    epsilon = 0.02 * cv2.arcLength(contour, True)
-    approx = cv2.approxPolyDP(contour, epsilon, True)
+    max_con, best_area = np.array([]), 0
+    min_area = (img.shape[0] * img.shape[1]) * (MIN_CONTOUR_AREA_PERC / 100)
 
-    return approx.reshape(-1, 2)
+    for con in contours:
+        area = cv2.contourArea(con)
+        if area > min_area and area > best_area:
+            approx = cv2.approxPolyDP(con, 0.02 * cv2.arcLength(con, True), True)
+            if len(approx) == 4:
+                max_con = approx
+                best_area = area
+
+    return max_con
 
 def sort_points(points: np.ndarray) -> np.ndarray:
     """Sort the input points representing the corners in a specific order.
@@ -153,7 +175,7 @@ def auto_balance_img_col(img: np.ndarray) -> np.ndarray:
 
     return normalized_img
 
-def auto_balance_img_white(img: np.ndarray) -> np.ndarray: #TODO edit for better results - add slider to last value in adaptivetreshold?
+def auto_balance_img_white(img: np.ndarray) -> np.ndarray:
     """Perform auto-balancing on the input image to be black and white.
 
     Args:
@@ -189,8 +211,8 @@ def show_image_on_postion(img: np.ndarray, win_name: str="Image", x: int=10, y: 
 
     return win_name
 
-def save_img(img: np.ndarray, file_name: str, folder_path, base_img_name: str, file_format: str):
-    """Save the image to a file in the specified folder.
+def save_img(img: np.ndarray, file_name: str, folder_path, base_img_name: str, file_format: str) -> bool:
+    """Save the image to a file in the specified folder. Return boolean status of operation.
 
     Args:
         img (np.ndarray): Image to be saved.
@@ -198,10 +220,19 @@ def save_img(img: np.ndarray, file_name: str, folder_path, base_img_name: str, f
         folder_path (os.path, optional): Folder where the file should be saved.
         base_img_name (str): Original image file name for image save file naming.
         file_format (str): Original image file format.
+
+    Returns:
+        bool: Boolean value that indicates status of operation. True is successfull, False otherwise if image is empty.
     """
-    full_file_name = base_img_name + '_' + file_name + file_format
+    full_file_name = f"{base_img_name}_{file_name}{file_format}"
+    file_path = os.path.join(folder_path, full_file_name)
+
+    if np.all(img == 0):
+        return False
+
     try:
-        cv2.imwrite(os.path.join(folder_path, full_file_name), img)
+        cv2.imwrite(file_path, img)
+        return True
     except Exception as e:
         print(f"Error: saving image to file: {e}")
         sys.exit(1)
@@ -215,10 +246,9 @@ def save_images(images: dict, folder_path: os.path, base_img_name: str, file_for
         img_file_name (str): Original image file name for image save file naming.
         file_format (str): Original image file format.
     """
-    for file_name, img in images.items():
-        save_img(img, file_name, folder_path, base_img_name, file_format)
+    return all(save_img(img, file_name, folder_path, base_img_name, file_format) for file_name, img in images.items())
 
-def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=1500, txt_color=(255, 255, 255), bg_color=(45, 134, 45)):
+def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=1500, txt_color=TEXT_COL, bg_color = POS_INFO):
     """
     Add text to the middle of the specified window and sleep for certain amount of time, then show original image without text.
 
@@ -284,23 +314,24 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
     img_cons = cv2.drawContours(img_scaled.copy(), contours, -1, (0, 255, 0), 10)
     images[CONS_IMG_FILENAME] = img_cons
 
-    max_contour = max(contours, key=cv2.contourArea) # TODO add case when there is missing contour
-    img_con = cv2.drawContours(img_scaled.copy(), [max_contour], 0, (0, 0, 255), 10)
-    images[CON_IMG_FILENAME] = img_con
+    max_contour = get_max_contour(img_scaled, contours)
+    if max_contour.size:
+        img_con = cv2.drawContours(img_scaled.copy(), [max_contour], 0, (0, 0, 255), 10)
+        images[CON_IMG_FILENAME] = img_con
 
-    points = get_contour_edge_points(max_contour)
-    img_points = img_con.copy()
-    for point in points:
-        cv2.circle(img_points, point, 15, (255, 0, 0), -1)
-    images[POINTS_IMG_FILENAME] = img_points
+        points = max_contour.reshape(-1, 2)
+        img_points = img_con.copy()
+        for point in points:
+            cv2.circle(img_points, point, 15, (255, 0, 0), -1)
+        images[POINTS_IMG_FILENAME] = img_points
 
-    img_transformed = transform_perspective_img(img_scaled, points)
-    images[TRANSFORMED_IMG_FILENAME] = img_transformed
-    img_cropped = crop_img(img_transformed, CROP_SIZE)
-    img_balanced = auto_balance_img_col(img_cropped)
-    images[BALANCED_IMG_FILENAME] = img_balanced
-    img_balanced_gray = auto_balance_img_white(img_cropped)
-    images[BALANCED_IMG_GRAY_FILENAME] = cv2.cvtColor(img_balanced_gray, cv2.COLOR_GRAY2BGR)
+        img_transformed = transform_perspective_img(img_scaled, points)
+        images[TRANSFORMED_IMG_FILENAME] = img_transformed
+        img_cropped = crop_img(img_transformed, CROP_SIZE)
+        img_balanced = auto_balance_img_col(img_cropped)
+        images[BALANCED_IMG_FILENAME] = img_balanced
+        img_balanced_gray = auto_balance_img_white(img_cropped)
+        images[BALANCED_IMG_GRAY_FILENAME] = cv2.cvtColor(img_balanced_gray, cv2.COLOR_GRAY2BGR)
 
     images_amount_half = len(images) // 2
     images_values = list(images.values())
@@ -314,6 +345,9 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
         if key in KEY_CLOSERS or cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1:
             cv2.destroyAllWindows()
             break
+
+        status, message, bg_color = None, None, None
+
         if key == ord('w'):
             components_save = os.path.join(folder_save, "saved_components")
             if not os.path.exists(components_save):
@@ -322,14 +356,19 @@ def process_a4(img_path: str, folder_save: str, base_img_name: str, file_format:
                 except Exception as e:
                     print(f"Error: Could not create the '{components_save}' folder: {e}")
                     sys.exit(1)
-            save_images(images, components_save, base_img_name, file_format)
-            add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
+
+            status = save_images(images, components_save, base_img_name, file_format)
+            message = "SAVED SUCCESSFULLY" if status else "SAVED PARTIALLY"
         elif key == ord('e'):
-            save_img(img_cropped, FINAL_IMG, folder_save, base_img_name, file_format)
-            add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
+            status = save_img(images[BALANCED_IMG_FILENAME], FINAL_IMG, folder_save, base_img_name, file_format)
+            message = "SAVED SUCCESSFULLY" if status else "NO IMAGE TO SAVE"
         elif key == ord('r'):
-            save_img(img_balanced_gray, FINAL_IMG_GR, folder_save, base_img_name, file_format)
-            add_info_on_window(win_name, f"SAVED SUCCESSULLY", stacked)
+            status = save_img(images[BALANCED_IMG_GRAY_FILENAME], FINAL_IMG_GR, folder_save, base_img_name, file_format)
+            message = "SAVED SUCCESSFULLY" if status else "NO IMAGE TO SAVE"
+
+        if status is not None:
+            bg_color = POS_INFO if status else (NEG_INFO if "NO IMAGE" in message else WARN_INFO)
+            add_info_on_window(win_name, message, stacked, bg_color=bg_color)
 
 def main():
     if len(sys.argv) not in {2, 3}:
