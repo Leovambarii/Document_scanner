@@ -17,7 +17,7 @@ TRACKBAR_CHANGE = False # Flag for indicating whether trackbar was changed and t
 
 #Initial trackbar values
 INIT_CROP_SIZE = 1 # Amount of pixels that will be cropped from each side of original scaled image
-CONTRAST = 0 # Additional contrast and dilation for edge detection, 0 means turned off - 1 means turned on
+CONTRAST = 0 # Additional contrast for edge detection, 0 means turned off - 1 means turned on
 BOTTOM_EDGE_TRESH = 30 # Value for edge detection bottom threshold
 TOP_EDGE_TRESH = 200 # Value for edge detection top threshold
 CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
@@ -179,11 +179,6 @@ def auto_balance_img_white(img: np.ndarray) -> np.ndarray:
     return balanced_img
 
 # --------- Functions related to trackbars ---------
-def nothing_callback(val):
-    """Callback function for trackbrs that does nothing.
-    """
-    pass
-
 def update_init_crop_size(val: int):
     """Update global init crop size variable on trackbar change.
 
@@ -279,12 +274,12 @@ def show_image_on_postion(img: np.ndarray, x: int=10, y: int=10, width: int=1400
     """
     cv2.namedWindow(WINDOW_INFO_NAME, cv2.WINDOW_NORMAL)
 
-    cv2.createTrackbar(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, nothing_callback)
-    cv2.createTrackbar(CONTRAST_TRACKBAR, WINDOW_INFO_NAME, 0, 1, nothing_callback)
-    cv2.createTrackbar(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, 0, 255, nothing_callback)
-    cv2.createTrackbar(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, 0, 255, nothing_callback)
-    cv2.createTrackbar(CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, nothing_callback)
-    cv2.createTrackbar(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, 0, 10, nothing_callback)
+    cv2.createTrackbar(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, update_init_crop_size)
+    cv2.createTrackbar(CONTRAST_TRACKBAR, WINDOW_INFO_NAME, 0, 1, update_contrast)
+    cv2.createTrackbar(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, 0, 255, update_edge_bot)
+    cv2.createTrackbar(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, 0, 255, update_edge_top)
+    cv2.createTrackbar(CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, update_crop_size)
+    cv2.createTrackbar(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, 0, 10, update_auto_balance)
 
     cv2.resizeWindow(WINDOW_INFO_NAME, width, height)
     cv2.moveWindow(WINDOW_INFO_NAME, x, y)
