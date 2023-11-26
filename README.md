@@ -1,7 +1,7 @@
 # Document Photo Scanner
 
 This Python project provides a document photo scanning application using OpenCV.
-Functions together with interface were fully written using only `cv2` and `numpy` as a form of challange for an advanced computer graphics course project.
+Functions together with interface were mainly written using only `cv2` and `numpy` as a form of challange for an advanced computer graphics course project.
 
 The application allows users to process an input image and perform various operations such as resizing, cropping, edge detection, and perspective transformation in order to achieve best results. Finally it allows saving of the results in form of component images or just the final processed image. The user can interact with the application through a graphical interface with trackbars for adjusting parameters and keyboard hotkeys for image saving and app closing.
 
