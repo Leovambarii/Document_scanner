@@ -3,10 +3,10 @@ import sys
 import os
 import numpy as np
 
-#TODO add camera option if no input image is specified
+# Global variables
 FOLDER_SAVE = "results"
 MAX_LEN_IMG = 2048 # Maximum width or height that orginal image will be proportionally resized
-MIN_CONTOUR_AREA_PERC = 20 # Minimum percentage of image that a best countour should have (int in range 0 to 100)
+MIN_CONTOUR_AREA_PERC = 15 # Minimum percentage of image that a best countour should have (int in range 0 to 100)
 KEY_CLOSERS = [ord('q'), 27] # q Esc - Keys that closes showed windows
 WINDOW_INFO_NAME = "Document Scanner: Esc/q -> exit | w -> save all components | e -> save final img | r -> save final img gray" # Window name that functions as info text
 TEXT_COL = (255, 255, 255) # Color of text on info popup
@@ -16,14 +16,16 @@ WARN_INFO = (0, 153, 255) # Color of warning info popup
 TRACKBAR_CHANGE = False # Flag for indicating whether trackbar was changed and there is a need to create new images
 
 #Initial trackbar values
+INIT_CROP_SIZE = 1 # Amount of pixels that will be cropped from each side of original scaled image
+CONTRAST = 0 # Additional contrast and dilation for edge detection, 0 means turned off - 1 means turned on
 BOTTOM_EDGE_TRESH = 30 # Value for edge detection bottom threshold
 TOP_EDGE_TRESH = 200 # Value for edge detection top threshold
-INIT_CROP_SIZE = 1 # Amount of pixels that will be cropped from each side of original scaled image
 CROP_SIZE = 25 # Amount of pixels that will be cropped from each side of image for final image
 BW_AUTOBALANCE = 2 # Value for black and white autobalance intensity
 
 # Trackbars names
 INIT_CROP_TRACKBAR = "Init cropping size"
+CONTRAST_TRACKBAR = "Edges additional contrast"
 EDGE_BOT_TRACKBAR = "Edges threshold bottom"
 EDGE_TOP_TRACKBAR = "Edges threshold top"
 CROP_TRACKBAR = "Cropping size"
@@ -61,6 +63,7 @@ def check_arguments(img_path: str, save_folder_path: str):
             print(f"Error: Could not create the folder '{save_folder_path}': {e}")
             sys.exit(1)
 
+# --------- Functions related to single image processing ---------
 def resize_img(img: np.ndarray, max_len: int=MAX_LEN_IMG) -> np.ndarray:
     """Resize image shape proportional to max_len if width or height is larger.
 
@@ -80,21 +83,6 @@ def resize_img(img: np.ndarray, max_len: int=MAX_LEN_IMG) -> np.ndarray:
 
     return img
 
-def fill_images_with_black(images: dict, ref_img: np.ndarray) -> dict:
-    """Fill all values of images dict with default black images that have shape of reference image.
-
-    Args:
-        images (dict): Dictionary that will contain np.ndarray images as values with its names as keys.
-        ref_img (np.ndarray): Reference image.
-
-    Returns:
-        dict: Filled dictionary with default black images.
-    """
-    black_image = np.zeros_like(ref_img)
-    filled_images = {name: black_image.copy() for name in images.keys()}
-
-    return filled_images
-
 def get_max_contour(img: np.ndarray, contours: np.ndarray) -> np.array:
     """Get the biggest contour that is rectangle-like and with size of at least 30% of image.
 
@@ -111,9 +99,9 @@ def get_max_contour(img: np.ndarray, contours: np.ndarray) -> np.array:
     for con in contours:
         area = cv2.contourArea(con)
         if area > min_area and area > best_area:
-            approx = cv2.approxPolyDP(con, 0.02 * cv2.arcLength(con, True), True)
-            if len(approx) == 4:
-                max_con = approx
+            polygon = cv2.approxPolyDP(con, 0.02 * cv2.arcLength(con, True), True)
+            if len(polygon) == 4:
+                max_con = polygon
                 best_area = area
 
     return max_con
@@ -175,19 +163,6 @@ def crop_img(img: np.ndarray, crop_size: int) -> np.ndarray:
 
     return resized_cropped_img
 
-def auto_balance_img_col(img: np.ndarray) -> np.ndarray:
-    """Perform auto-balancing on the input image.
-
-    Args:
-        img (np.ndarray): Image to be auto-balanced.
-
-    Returns:
-        np.ndarray: The normalized image after auto-balancing.
-    """
-    normalized_img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
-
-    return normalized_img
-
 def auto_balance_img_white(img: np.ndarray) -> np.ndarray:
     """Perform auto-balancing on the input image to be black and white.
 
@@ -203,6 +178,7 @@ def auto_balance_img_white(img: np.ndarray) -> np.ndarray:
 
     return balanced_img
 
+# --------- Functions related to trackbars ---------
 def nothing_callback(val):
     """Callback function for trackbrs that does nothing.
     """
@@ -221,6 +197,18 @@ def update_init_crop_size(val: int):
         INIT_CROP_SIZE = val
         TRACKBAR_CHANGE = True
     cv2.setTrackbarPos(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, INIT_CROP_SIZE)
+
+def update_contrast(val: int):
+    """Update global contrast edge variable on trackbar change.
+
+    Args:
+        val (int): New value to set.
+    """
+    global CONTRAST, TRACKBAR_CHANGE
+    if CONTRAST != val:
+        CONTRAST = val
+        TRACKBAR_CHANGE = True
+    cv2.setTrackbarPos(CONTRAST_TRACKBAR, WINDOW_INFO_NAME, CONTRAST)
 
 def update_edge_bot(val: int):
     """Update global bottom edge threshold variable on trackbar change.
@@ -278,6 +266,7 @@ def update_auto_balance(val: int):
         TRACKBAR_CHANGE = True
     cv2.setTrackbarPos(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, BW_AUTOBALANCE)
 
+# --------- Functions related to interface display ---------
 def show_image_on_postion(img: np.ndarray, x: int=10, y: int=10, width: int=1400, height: int=800):
     """Show given image in a window specified at (x, y) position with shape (width, height). Also adds trackbars for edges, cropsize and autobalance.
 
@@ -291,15 +280,45 @@ def show_image_on_postion(img: np.ndarray, x: int=10, y: int=10, width: int=1400
     cv2.namedWindow(WINDOW_INFO_NAME, cv2.WINDOW_NORMAL)
 
     cv2.createTrackbar(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, nothing_callback)
+    cv2.createTrackbar(CONTRAST_TRACKBAR, WINDOW_INFO_NAME, 0, 1, nothing_callback)
     cv2.createTrackbar(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, 0, 255, nothing_callback)
     cv2.createTrackbar(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, 0, 255, nothing_callback)
     cv2.createTrackbar(CROP_TRACKBAR, WINDOW_INFO_NAME, 1, 250, nothing_callback)
-    cv2.createTrackbar(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, 0, 15, nothing_callback)
+    cv2.createTrackbar(BW_AUTOBALANCE_TRACKBAR, WINDOW_INFO_NAME, 0, 10, nothing_callback)
 
     cv2.resizeWindow(WINDOW_INFO_NAME, width, height)
     cv2.moveWindow(WINDOW_INFO_NAME, x, y)
     cv2.imshow(WINDOW_INFO_NAME, img)
 
+def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=1500, txt_color=TEXT_COL, bg_color = POS_INFO):
+    """
+    Add text to the middle of the specified window and sleep for certain amount of time, then show original image without text.
+
+    Args:
+        win_name (str): Name of the window.
+        txt (str): Text to be added.
+        img (np.ndarray): Image associated with the window.
+        wait_time (int): Amount of time in miliseconds to wait before added text dissapears. Defaults 1500.
+        txt_color : Color of the text.
+        bg_color : Color of the text background.
+    """
+    img_copy = img.copy()
+
+    font_thickness = 25
+    font_scale = min(img_copy.shape[1] // (len(txt) * font_thickness), img_copy.shape[0] // 10)
+    txt_size, _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+    txt_position = ((img_copy.shape[1] - txt_size[0]) // 2, (img_copy.shape[0] + txt_size[1]) // 2)
+
+    rectangle_size = (txt_size[0] + font_thickness*5, txt_size[1] + font_thickness*5)
+    rectangle_position = ((img_copy.shape[1] - rectangle_size[0]) // 2, (img_copy.shape[0] + rectangle_size[1]) // 2)
+    cv2.rectangle(img_copy, rectangle_position, (rectangle_position[0] + rectangle_size[0], rectangle_position[1] - rectangle_size[1]), bg_color, thickness=cv2.FILLED)
+
+    cv2.putText(img_copy, txt, txt_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, txt_color, font_thickness)
+    cv2.imshow(win_name, img_copy)
+    cv2.waitKey(wait_time)
+    cv2.imshow(win_name, img)
+
+# --------- Functions related to image saving ---------
 def save_img(img: np.ndarray, file_name: str, folder_path, base_img_name: str, file_format: str) -> bool:
     """Save the image to a file in the specified folder. Return boolean status of operation.
 
@@ -337,51 +356,51 @@ def save_images(images: dict, folder_path: os.path, base_img_name: str, file_for
     """
     return all(save_img(img, file_name, folder_path, base_img_name, file_format) for file_name, img in images.items())
 
-def add_info_on_window(win_name: str, txt: str, img: np.ndarray, wait_time: int=1500, txt_color=TEXT_COL, bg_color = POS_INFO):
-    """
-    Add text to the middle of the specified window and sleep for certain amount of time, then show original image without text.
+# --------- Functions related to full image processing ---------
+def fill_images_with_black(images: dict, ref_img: np.ndarray) -> dict:
+    """Fill all values of images dict with default black images that have shape of reference image.
 
     Args:
-        win_name (str): Name of the window.
-        txt (str): Text to be added.
-        img (np.ndarray): Image associated with the window.
-        wait_time (int): Amount of time in miliseconds to wait before added text dissapears. Defaults 1500.
-        txt_color : Color of the text.
-        bg_color : Color of the text background.
+        images (dict): Dictionary that will contain np.ndarray images as values with its names as keys.
+        ref_img (np.ndarray): Reference image.
+
+    Returns:
+        dict: Filled dictionary with default black images.
     """
-    img_copy = img.copy()
+    black_image = np.zeros_like(ref_img)
+    filled_images = {name: black_image.copy() for name in images.keys()}
 
-    font_thickness = 40
-    font_scale = min(img_copy.shape[1] // (len(txt) * font_thickness), img_copy.shape[0] // 10)
-    txt_size, _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
-    txt_position = ((img_copy.shape[1] - txt_size[0]) // 2, (img_copy.shape[0] + txt_size[1]) // 2)
+    return filled_images
 
-    rectangle_size = (txt_size[0] + font_thickness*5, txt_size[1] + font_thickness*5)
-    rectangle_position = ((img_copy.shape[1] - rectangle_size[0]) // 2, (img_copy.shape[0] + rectangle_size[1]) // 2)
-    cv2.rectangle(img_copy, rectangle_position, (rectangle_position[0] + rectangle_size[0], rectangle_position[1] - rectangle_size[1]), bg_color, thickness=cv2.FILLED)
+def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray):
+    """Process given image by performing blurring, image detection, perspective warp and auto-balance. Save results as values
+    in given dictionary for corresponding keys and return it together with stacked images for display purpose.
 
-    cv2.putText(img_copy, txt, txt_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, txt_color, font_thickness)
-    cv2.imshow(win_name, img_copy)
-    cv2.waitKey(wait_time)
-    cv2.imshow(win_name, img)
+    Args:
+        images (dict): Dictionary to store all image compomonents.
+        img (np.ndarray): Input image to process.
 
-def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray): #TODO docstring
-    img_scaled = resize_img(img)
-    img_scaled = crop_img(img_scaled, INIT_CROP_SIZE)
+    Returns:
+        tuple: Updated images dictionary and stacked image for display.
+    """
+    img_scaled = crop_img(resize_img(img), INIT_CROP_SIZE)
     images = fill_images_with_black(images, img_scaled)
     images[SCALED_IMG_FILENAME] = img_scaled
 
     img_gray = cv2.cvtColor(img_scaled, cv2.COLOR_BGR2GRAY)
+    if CONTRAST:
+        img_gray = cv2.equalizeHist(img_gray)
     images[GRAY_IMG_FILENAME] = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
     img_blurred = cv2.GaussianBlur(img_gray, (5, 5), 1)
     images[BLUR_IMG_FILENAME] = cv2.cvtColor(img_blurred, cv2.COLOR_GRAY2BGR)
+
     img_edges = cv2.Canny(img_blurred, BOTTOM_EDGE_TRESH, TOP_EDGE_TRESH)
     kernel = np.ones((3, 3))
-    img_dial = cv2.dilate(img_edges, kernel, iterations=2)
-    img_erode = cv2.erode(img_dial, kernel, iterations=1)
-    images[EDGE_IMG_FILENAME] = cv2.cvtColor(img_erode, cv2.COLOR_GRAY2BGR)
+    img_dilate = cv2.dilate(img_edges, kernel, iterations=2)
+    img_edges = cv2.erode(img_dilate, kernel, iterations=1)
+    images[EDGE_IMG_FILENAME] = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2BGR)
 
-    contours, _ = cv2.findContours(img_erode, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(img_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     img_cons = cv2.drawContours(img_scaled.copy(), contours, -1, (0, 255, 0), 10)
     images[CONS_IMG_FILENAME] = img_cons
 
@@ -400,7 +419,7 @@ def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray): #TODO docs
         images[TRANSFORMED_IMG_FILENAME] = img_transformed
         img_cropped = crop_img(img_transformed, CROP_SIZE)
 
-        img_balanced = auto_balance_img_col(img_cropped)
+        img_balanced = cv2.normalize(img_cropped, None, 0, 255, cv2.NORM_MINMAX)
         images[BALANCED_IMG_FILENAME] = img_balanced
         img_balanced_gray = auto_balance_img_white(img_cropped)
         images[BALANCED_IMG_GRAY_FILENAME] = cv2.cvtColor(img_balanced_gray, cv2.COLOR_GRAY2BGR)
@@ -413,7 +432,15 @@ def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray): #TODO docs
 
     return images, stacked
 
-def display_loop(img_path: str, folder_save: str, base_img_name: str, file_format: str): #TODO finish docstring and clean up arguments
+def display_loop(img_path: str, folder_save: str, base_img_name: str, file_format: str):
+    """Process input image and run infinite loop that displays results with interface for user interaction.
+
+    Args:
+        img_path (str): Path to input image.
+        folder_save (str): Folder where the result files should be saved.
+        base_img_name (str): Input image basename.
+        file_format (str): Input image file format.
+    """
     images = {
         SCALED_IMG_FILENAME         : None,
         GRAY_IMG_FILENAME           : None,
@@ -435,6 +462,7 @@ def display_loop(img_path: str, folder_save: str, base_img_name: str, file_forma
     TRACKBAR_CHANGE = False
 
     cv2.setTrackbarPos(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME, INIT_CROP_SIZE)
+    cv2.setTrackbarPos(CONTRAST_TRACKBAR, WINDOW_INFO_NAME, CONTRAST)
     cv2.setTrackbarPos(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME, BOTTOM_EDGE_TRESH)
     cv2.setTrackbarPos(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME, TOP_EDGE_TRESH)
     cv2.setTrackbarPos(CROP_TRACKBAR, WINDOW_INFO_NAME, CROP_SIZE)
@@ -447,6 +475,7 @@ def display_loop(img_path: str, folder_save: str, base_img_name: str, file_forma
             break
 
         update_init_crop_size(cv2.getTrackbarPos(INIT_CROP_TRACKBAR, WINDOW_INFO_NAME))
+        update_contrast(cv2.getTrackbarPos(CONTRAST_TRACKBAR, WINDOW_INFO_NAME))
         update_edge_bot(cv2.getTrackbarPos(EDGE_BOT_TRACKBAR, WINDOW_INFO_NAME))
         update_edge_top(cv2.getTrackbarPos(EDGE_TOP_TRACKBAR, WINDOW_INFO_NAME))
         update_crop_size(cv2.getTrackbarPos(CROP_TRACKBAR, WINDOW_INFO_NAME))
