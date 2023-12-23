@@ -178,6 +178,27 @@ def auto_balance_img_white(img: np.ndarray) -> np.ndarray:
 
     return balanced_img
 
+def auto_canny(img: np.ndarray, sigma=0.5) -> np.ndarray:
+    """Find optimal lower and upper thresholds for Canny edge detection based on given gray image.
+
+    Args:
+        img (np.ndarray): Gray image on which tresholds will be calculated.
+        sigma (float, optional): Float used to vary the percentage thresholds. Defaults to 0.5.
+
+    Returns:
+        np.ndarray: Detected edges of an image based on calculated tresholds.
+    """
+    median = np.median(img)
+    bot_tresh = int(max(0, (1.0 - sigma) * median))
+    top_tresh = int(min(255, (1.0 + sigma) * median))
+    img_edges = cv2.Canny(img, bot_tresh, top_tresh)
+
+    global BOTTOM_EDGE_TRESH, TOP_EDGE_TRESH
+    BOTTOM_EDGE_TRESH = bot_tresh
+    TOP_EDGE_TRESH = top_tresh
+
+    return img_edges
+
 # --------- Functions related to trackbars ---------
 def update_init_crop_size(val: int):
     """Update global init crop size variable on trackbar change.
@@ -367,13 +388,14 @@ def fill_images_with_black(images: dict, ref_img: np.ndarray) -> dict:
 
     return filled_images
 
-def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray):
+def process_img(images: dict, img: np.ndarray, init: bool=False) -> (dict, np.ndarray):
     """Process given image by performing blurring, image detection, perspective warp and auto-balance. Save results as values
     in given dictionary for corresponding keys and return it together with stacked images for display purpose.
 
     Args:
         images (dict): Dictionary to store all image compomonents.
         img (np.ndarray): Input image to process.
+        init (bool): Flag for initial auto edge detection treshold setting.
 
     Returns:
         tuple: Updated images dictionary and stacked image for display.
@@ -386,13 +408,10 @@ def process_img(images: dict, img: np.ndarray) -> (dict, np.ndarray):
     if CONTRAST:
         img_gray = cv2.equalizeHist(img_gray)
     images[GRAY_IMG_FILENAME] = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
-    img_blurred = cv2.GaussianBlur(img_gray, (5, 5), 1)
+    img_blurred = cv2.GaussianBlur(img_gray, (3, 3), 0)
     images[BLUR_IMG_FILENAME] = cv2.cvtColor(img_blurred, cv2.COLOR_GRAY2BGR)
 
-    img_edges = cv2.Canny(img_blurred, BOTTOM_EDGE_TRESH, TOP_EDGE_TRESH)
-    kernel = np.ones((3, 3))
-    img_dilate = cv2.dilate(img_edges, kernel, iterations=2)
-    img_edges = cv2.erode(img_dilate, kernel, iterations=1)
+    img_edges = auto_canny(img_blurred) if init else cv2.Canny(img_blurred, BOTTOM_EDGE_TRESH, TOP_EDGE_TRESH)
     images[EDGE_IMG_FILENAME] = cv2.cvtColor(img_edges, cv2.COLOR_GRAY2BGR)
 
     contours, _ = cv2.findContours(img_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -450,7 +469,7 @@ def display_loop(img_path: str, folder_save: str, base_img_name: str, file_forma
     }
 
     img = cv2.imread(img_path)
-    images, stacked = process_img(images, img)
+    images, stacked = process_img(images, img, True)
     show_image_on_postion(stacked)
 
     global TRACKBAR_CHANGE
